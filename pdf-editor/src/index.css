@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 min-h-screen;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20 shadow-2xl;
+  }
+
+  .btn-primary {
+    @apply bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105;
+  }
+
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium px-6 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 transition-all duration-200;
+  }
+}
+
+/* PDF Canvas Styling */
+.pdf-canvas {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: white;
+}
+
+/* Text overlay for clickable areas */
+.text-overlay {
+  position: absolute;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  overflow: visible; /* Allow edited text to extend beyond bounds */
+  z-index: 1;
+}
+
+.text-overlay:hover {
+  background-color: rgba(59, 130, 246, 0.1);
+  outline: 1px solid rgba(59, 130, 246, 0.4);
+  outline-offset: -1px;
+  z-index: 2;
+}
+
+.text-overlay.selected {
+  background-color: rgba(59, 130, 246, 0.15);
+  outline: 2px solid #3b82f6;
+  outline-offset: -1px;
+  z-index: 3;
+}
+
+/* Special styling for edited text overlays */
+.text-overlay.edited {
+  background-color: transparent;
+}
+
+.text-overlay.edited:hover {
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+/* Loading animation */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.loading-shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
