@@ -1,23 +1,31 @@
 import { useState, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import PDFViewer from './components/PDFViewer';
-import TextEditor from './components/TextEditor';
 import DownloadButton from './components/DownloadButton';
 import { FileText, Sparkles } from 'lucide-react';
 
 function App() {
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfArrayBuffer, setPdfArrayBuffer] = useState(null);
-  const [selectedText, setSelectedText] = useState(null);
   const [editedTexts, setEditedTexts] = useState({});
   const [refreshKey, setRefreshKey] = useState(0);
-  const [allTextItems, setAllTextItems] = useState([]);
 
   // Listen for inline text updates from PDFViewer
   useEffect(() => {
     const handleUpdateText = (event) => {
-      const { id, text } = event.detail;
-      handleTextUpdate(id, text);
+      const { id, text, textItem } = event.detail;
+      console.log('═════════════════════════════════════════════');
+      console.log('📝 UPDATE EVENT RECEIVED in App.jsx');
+      console.log('═════════════════════════════════════════════');
+      console.log('Event detail:', event.detail);
+      console.log('  id:', id);
+      console.log('  text:', text);
+      if (textItem) {
+        console.log('  textItem.textColorCSS:', textItem.textColorCSS);
+        console.log('  textItem.textColor:', textItem.textColor);
+      }
+      console.log('═════════════════════════════════════════════');
+      handleTextUpdate(id, text, textItem);
     };
 
     window.addEventListener('updateText', handleUpdateText);
@@ -25,37 +33,58 @@ function App() {
   }, []);
 
   const handleFileUpload = async (file) => {
+    console.log('📂 FILE UPLOADED:', file.name);
     setPdfFile(file);
     const arrayBuffer = await file.arrayBuffer();
     setPdfArrayBuffer(arrayBuffer);
     setEditedTexts({});
-    setSelectedText(null);
-    setAllTextItems([]);
     setRefreshKey(prev => prev + 1);
   };
 
-  const handleTextSelect = (textData) => {
-    setSelectedText(textData);
-  };
+  const handleTextUpdate = (textId, newText, textItem) => {
+    console.log('═════════════════════════════════════════════');
+    console.log('🔄 handleTextUpdate CALLED');
+    console.log('═════════════════════════════════════════════');
+    console.log('  textId:', textId);
+    console.log('  newText:', newText);
+    console.log('  textItem.textColor (array):', textItem?.textColor);
+    console.log('  textItem.textColorCSS (string):', textItem?.textColorCSS);
+    console.log('═════════════════════════════════════════════');
 
-  const handleTextItemsLoaded = (items) => {
-    setAllTextItems(items);
-  };
-
-  const handleTextUpdate = (textId, newText) => {
-    setEditedTexts(prev => ({
-      ...prev,
-      [textId]: newText
-    }));
+    setEditedTexts(prev => {
+      const updateData = {
+        text: newText,
+        color: textItem?.textColorCSS || 'rgb(0, 0, 0)',
+        colorArray: textItem?.textColor || [0, 0, 0],
+      };
+      
+      console.log('═════════════════════════════════════════════');
+      console.log('💾 STORING EDIT DATA');
+      console.log('═════════════════════════════════════════════');
+      console.log('textId:', textId);
+      console.log('updateData:', updateData);
+      console.log('updateData.color:', updateData.color);
+      console.log('updateData.colorArray:', updateData.colorArray);
+      console.log('═════════════════════════════════════════════');
+      
+      const result = {
+        ...prev,
+        [textId]: updateData
+      };
+      
+      console.log('Final stored value for', textId, ':', result[textId]);
+      
+      return result;
+    });
+    
     setRefreshKey(prev => prev + 1);
   };
 
   const handleReset = () => {
+    console.log('🔄 RESET: Clearing all edits');
     setPdfFile(null);
     setPdfArrayBuffer(null);
-    setSelectedText(null);
     setEditedTexts({});
-    setAllTextItems([]);
     setRefreshKey(0);
   };
 
@@ -74,7 +103,7 @@ function App() {
             <Sparkles className="w-6 h-6 text-indigo-500" />
           </div>
           <p className="text-gray-600 text-lg">
-            Edit any text in your PDF documents with ease
+            Click on any text to edit it directly - colors are preserved!
           </p>
         </div>
 
@@ -83,14 +112,14 @@ function App() {
         ) : (
           <div className="space-y-6">
             {/* Control Panel */}
-            <div className="glass-card rounded-2xl p-6">
+            <div className="bg-white/80 backdrop-blur-xl border border-white/20 shadow-2xl rounded-2xl p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-gray-800 text-lg">
                     {pdfFile.name}
                   </h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Click on any text to edit it
+                    Click on any text to edit it directly on the PDF
                   </p>
                 </div>
                 <div className="flex gap-3">
@@ -101,7 +130,7 @@ function App() {
                   />
                   <button
                     onClick={handleReset}
-                    className="btn-secondary"
+                    className="bg-white hover:bg-gray-50 text-gray-700 font-medium px-6 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 transition-all duration-200"
                   >
                     Upload New PDF
                   </button>
@@ -109,37 +138,51 @@ function App() {
               </div>
             </div>
 
-            {/* Main Content */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* PDF Viewer */}
-              <div className="lg:col-span-2">
-                <PDFViewer
-                  key={refreshKey}
-                  pdfFile={pdfArrayBuffer}
-                  onTextSelect={handleTextSelect}
-                  onTextItemsLoaded={handleTextItemsLoaded}
-                  editedTexts={editedTexts}
-                  selectedTextId={selectedText?.id}
-                />
-              </div>
-
-              {/* Text Editor Sidebar */}
-              <div className="lg:col-span-1">
-                <TextEditor
-                  selectedText={selectedText}
-                  onTextUpdate={handleTextUpdate}
-                  onTextSelect={handleTextSelect}
-                  editedTexts={editedTexts}
-                  allTextItems={allTextItems}
-                />
-              </div>
+            {/* PDF Viewer - Full Width with Inline Editing */}
+            <div>
+              <PDFViewer
+                key={refreshKey}
+                pdfFile={pdfArrayBuffer}
+                editedTexts={editedTexts}
+              />
             </div>
+
+            {/* Edit Info */}
+            {Object.keys(editedTexts).length > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-2xl">✅</span>
+                  <h3 className="font-semibold text-green-900 text-lg">
+                    {Object.keys(editedTexts).length} edit{Object.keys(editedTexts).length !== 1 ? 's' : ''} made
+                  </h3>
+                </div>
+                <div className="space-y-2">
+                  {Object.entries(editedTexts).map(([id, data]) => (
+                    <div key={id} className="text-sm text-green-800">
+                      <span className="font-medium">
+                        {typeof data === 'object' ? data.text : data}
+                      </span>
+                      {typeof data === 'object' && data.color && (
+                        <span 
+                          className="ml-2 inline-block px-2 py-1 rounded text-xs text-white"
+                          style={{ backgroundColor: data.color }}
+                          title={`Stored color: ${data.color}`}
+                        >
+                          Color: {data.color}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Footer */}
         <div className="text-center mt-12 text-gray-500 text-sm">
           <p>✨ All processing happens in your browser - your files never leave your device</p>
+          <p className="mt-2 text-xs">💾 Open DevTools (F12) → Console to see detailed color logging</p>
         </div>
       </div>
     </div>

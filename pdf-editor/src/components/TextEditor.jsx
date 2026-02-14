@@ -10,7 +10,7 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
   useEffect(() => {
     if (selectedText) {
       const currentValue = editedTexts[selectedText.id] !== undefined
-        ? editedTexts[selectedText.id]
+        ? editedTexts[selectedText.id].text || editedTexts[selectedText.id]
         : selectedText.text;
       setEditValue(currentValue);
       setIsEditing(true);
@@ -20,7 +20,8 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
 
   const handleSave = () => {
     if (selectedText) {
-      onTextUpdate(selectedText.id, editValue);
+      // Pass the complete text item with color information
+      onTextUpdate(selectedText.id, editValue, selectedText);
       setIsEditing(false);
       setViewMode('list');
     }
@@ -34,7 +35,8 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
   const handleReset = () => {
     if (selectedText) {
       setEditValue(selectedText.text);
-      onTextUpdate(selectedText.id, selectedText.text);
+      // Pass the complete text item to reset with color preserved
+      onTextUpdate(selectedText.id, selectedText.text, selectedText);
     }
   };
 
@@ -97,7 +99,19 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
             ) : (
               filteredTextItems.map((item) => {
                 const isEdited = editedTexts[item.id] !== undefined;
-                const displayText = isEdited ? editedTexts[item.id] : item.text;
+                let displayText = item.text;
+                let displayColor = item.textColorCSS || 'rgb(0, 0, 0)';
+                
+                if (isEdited) {
+                  const editData = editedTexts[item.id];
+                  if (typeof editData === 'object' && editData.text) {
+                    displayText = editData.text;
+                    // Preserve original color even after edit
+                    displayColor = editData.color || item.textColorCSS || 'rgb(0, 0, 0)';
+                  } else {
+                    displayText = editData;
+                  }
+                }
 
                 return (
                   <div
@@ -109,7 +123,7 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
                       }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm text-gray-700 flex-1 line-clamp-2">
+                      <p className="text-sm font-medium flex-1 line-clamp-2" style={{ color: displayColor }}>
                         {displayText}
                       </p>
                       {isEdited && (
@@ -135,8 +149,11 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
               <label className="block text-xs font-medium text-gray-600 mb-2">
                 Original Text
               </label>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700">
-                {selectedText.text}
+              <div 
+                className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm"
+                style={{ color: selectedText?.textColorCSS || 'rgb(0, 0, 0)' }}
+              >
+                {selectedText?.text}
               </div>
             </div>
 
@@ -159,18 +176,34 @@ function TextEditor({ selectedText, onTextUpdate, editedTexts, allTextItems, onT
             <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-gray-600">Font:</span>
-                <span className="font-medium text-gray-800">{selectedText.fontName}</span>
+                <span className="font-medium text-gray-800">{selectedText?.fontName}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Size:</span>
-                <span className="font-medium text-gray-800">{Math.round(selectedText.fontSize)}px</span>
+                <span className="font-medium text-gray-800">{Math.round(selectedText?.fontSize)}px</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Position:</span>
                 <span className="font-medium text-gray-800">
-                  {Math.round(selectedText.x)}, {Math.round(selectedText.y)}
+                  {Math.round(selectedText?.x)}, {Math.round(selectedText?.y)}
                 </span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Color:</span>
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-5 h-5 rounded border border-gray-400"
+                    style={{ backgroundColor: selectedText?.textColorCSS || 'rgb(0, 0, 0)' }}
+                  />
+                  <span className="font-medium text-gray-800">{selectedText?.textColorCSS || 'Black'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Color Preservation Notice */}
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-900">
+              <div className="font-bold mb-1">✓ Color Preservation</div>
+              <p>Your edited text will retain the original color: <strong>{selectedText?.textColorCSS || 'Black'}</strong></p>
             </div>
           </div>
 
