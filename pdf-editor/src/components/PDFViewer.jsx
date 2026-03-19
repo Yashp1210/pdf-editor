@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 /**
- * CORRECT FIX: Map text items to the color that was ACTIVE when they were rendered
+ * Map text items to the color that was ACTIVE when they were rendered.
  */
 async function extractTextWithColors(page) {
   const textContent = await page.getTextContent();
   const operatorList = await page.getOperatorList();
-  
-  console.log('🎨 Extracting colors from operators...');
-  console.log('Total operators to process:', operatorList.fnArray.length);
   
   // Track ALL color changes (including black)
   const colorChanges = [];
@@ -25,9 +23,7 @@ async function extractTextWithColors(page) {
       colorChanges.push({
         operatorIndex: i,
         color: [args[0], args[1], args[2]],
-        colorStr: `RGB(${args[0].toFixed(3)}, ${args[1].toFixed(3)}, ${args[2].toFixed(3)})`
       });
-      console.log(`  [${i}] setFillRGBColor: RGB(${args[0].toFixed(3)}, ${args[1].toFixed(3)}, ${args[2].toFixed(3)})`);
     }
     // Op 5: setFillGray
     else if (fn === pdfjsLib.OPS.setFillGray && args && args.length >= 1) {
@@ -35,25 +31,17 @@ async function extractTextWithColors(page) {
       colorChanges.push({
         operatorIndex: i,
         color: [gray, gray, gray],
-        colorStr: `Gray(${gray.toFixed(3)})`
       });
-      console.log(`  [${i}] setFillGray: ${gray.toFixed(3)}`);
     }
   }
   
-  console.log(`✓ Found ${colorChanges.length} total color change operations`);
-  
-  // KEY FIX: For each text item, find what color was ACTIVE when it was rendered
-  // This is done by mapping the text item's position to the operator stream
+  // For each text item, find what color was ACTIVE when it was rendered.
+  // Estimate the item's position in the operator stream by its index ratio.
   const textWithColors = textContent.items.map((item, itemIndex) => {
-    // Estimate this text item's position in the operator stream
-    // If text item is 25% through the document, estimate it's at 25% through operators
     const textPositionRatio = itemIndex / textContent.items.length;
     const estimatedOperatorIndex = textPositionRatio * operatorList.fnArray.length;
     
-    // Find the LAST color change that occurred BEFORE or AT this estimated position
-    // This gives us the color that was ACTIVE when this text was rendered
-    let color = [0, 0, 0]; // default black if no color change found
+    let color = [0, 0, 0]; // default black
     
     for (let i = colorChanges.length - 1; i >= 0; i--) {
       if (colorChanges[i].operatorIndex <= estimatedOperatorIndex) {
@@ -66,27 +54,6 @@ async function extractTextWithColors(page) {
       ...item,
       extractedColor: color,
     };
-  });
-  
-  console.log(`✓ Assigned colors to ${textWithColors.length} text items`);
-  console.log(`\n=== FINAL TEXT ITEM COLORS (First 20) ===`);
-  textWithColors.slice(0, 20).forEach((item, idx) => {
-    const [r, g, b] = item.extractedColor || [0, 0, 0];
-    const isAlready255Range = Math.max(r, g, b) > 1;
-    const r255 = isAlready255Range ? r : Math.round(r * 255);
-    const g255 = isAlready255Range ? g : Math.round(g * 255);
-    const b255 = isAlready255Range ? b : Math.round(b * 255);
-    
-    const isBlack = r === 0 && g === 0 && b === 0;
-    const isBlue = r > 40 && g > 100 && b > 170;
-    
-    if (isBlue) {
-      console.log(`✓ Item ${idx}: "${item.str.substring(0, 30)}" -> RGB(${r255}, ${g255}, ${b255}) [BLUE]`);
-    } else if (isBlack) {
-      console.log(`  Item ${idx}: "${item.str.substring(0, 30)}" -> RGB(0, 0, 0) [BLACK]`);
-    } else {
-      console.log(`  Item ${idx}: "${item.str.substring(0, 30)}" -> RGB(${r255}, ${g255}, ${b255}) [OTHER]`);
-    }
   });
   
   return textWithColors;
@@ -109,19 +76,17 @@ function PDFViewer({ pdfFile, editedTexts }) {
     if (!pdfFile) return;
 
     let isMounted = true;
+    let loadingTask = null;
 
     const loadPdf = async () => {
       try {
         setLoading(true);
         setError(null);
-        console.log('📄 Starting PDF load...');
 
         const pdfData = new Uint8Array(pdfFile).slice(0);
-        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
-        console.log('📋 Loading task created');
+        loadingTask = pdfjsLib.getDocument({ data: pdfData });
 
         const pdf = await loadingTask.promise;
-        console.log('✓ PDF loaded successfully, pages:', pdf.numPages);
 
         if (!isMounted) return;
 
@@ -132,10 +97,9 @@ function PDFViewer({ pdfFile, editedTexts }) {
 
         let canvas = canvasRef.current;
         let retries = 0;
-        const maxRetries = 2;
+        const maxRetries = 10;
 
         while (!canvas && retries < maxRetries) {
-          console.log(`Canvas not ready, waiting... (attempt ${retries + 1}/${maxRetries})`);
           await new Promise(resolve => setTimeout(resolve, 100));
           canvas = canvasRef.current;
           retries++;
@@ -145,23 +109,18 @@ function PDFViewer({ pdfFile, editedTexts }) {
           throw new Error('Canvas element not available');
         }
 
-        console.log('✓ Canvas ready!');
         const context = canvas.getContext('2d');
         const viewport = page.getViewport({ scale });
 
         canvas.height = viewport.height;
         canvas.width = viewport.width;
 
-        console.log('🎬 Rendering to canvas...');
         await page.render({
           canvasContext: context,
           viewport: viewport,
         }).promise;
 
-        console.log('✓ Rendered successfully');
-
         const textItems = await extractTextWithColors(page);
-        console.log('📝 Extracted', textItems.length, 'text items with colors');
 
         if (!isMounted) return;
 
@@ -237,13 +196,13 @@ function PDFViewer({ pdfFile, editedTexts }) {
           };
         }).filter(item => item.text.trim().length > 0);
 
-        console.log('✓ Processed', items.length, 'clickable text items');
         setTextItems(items);
 
         setLoading(false);
-      } catch (error) {
-        console.error('❌ PDF Error:', error);
-        setError(error.message || 'Failed to load PDF');
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('PDF load error:', err);
+        setError((err instanceof Error ? err.message : String(err)) || 'Failed to load PDF');
         setLoading(false);
       }
     };
@@ -252,6 +211,9 @@ function PDFViewer({ pdfFile, editedTexts }) {
 
     return () => {
       isMounted = false;
+      if (loadingTask) {
+        loadingTask.destroy();
+      }
     };
   }, [pdfFile, scale, pageNum]);
 
@@ -263,16 +225,6 @@ function PDFViewer({ pdfFile, editedTexts }) {
   }, [editingTextId]);
 
   const handleTextClick = (item) => {
-    console.log('═══════════════════════════════════════');
-    console.log('🖱️  TEXT CLICKED');
-    console.log('═══════════════════════════════════════');
-    console.log('Text ID:', item.id);
-    console.log('Text Content:', item.text);
-    console.log('─── COLOR INFORMATION ───');
-    console.log('textColorCSS string:', item.textColorCSS);
-    console.log('textColor array:', item.textColor);
-    console.log('═══════════════════════════════════════');
-    
     const currentText = editedTexts[item.id] !== undefined 
       ? (typeof editedTexts[item.id] === 'object' ? editedTexts[item.id].text : editedTexts[item.id])
       : item.text;
@@ -282,12 +234,6 @@ function PDFViewer({ pdfFile, editedTexts }) {
   };
 
   const handleSaveEdit = (item) => {
-    console.log('💾 SAVING EDIT');
-    console.log('  ID:', item.id);
-    console.log('  Old Text:', item.text);
-    console.log('  New Text:', editingValue);
-    console.log('  Color being preserved:', item.textColorCSS);
-    
     const event = new CustomEvent('updateText', {
       detail: { 
         id: item.id, 
@@ -302,7 +248,6 @@ function PDFViewer({ pdfFile, editedTexts }) {
   };
 
   const handleCancelEdit = () => {
-    console.log('❌ Edit cancelled');
     setEditingTextId(null);
     setEditingValue('');
   };

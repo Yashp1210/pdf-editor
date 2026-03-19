@@ -1,6 +1,19 @@
 import { Upload, FileText } from 'lucide-react';
 import { useState } from 'react';
 
+const MAX_FILE_SIZE_MB = 50;
+
+function validatePdfFile(file) {
+  if (!file) return null;
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    return 'Please upload a PDF file.';
+  }
+  if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+    return `File is too large. Maximum allowed size is ${MAX_FILE_SIZE_MB} MB.`;
+  }
+  return null;
+}
+
 function FileUpload({ onFileUpload }) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -18,19 +31,25 @@ function FileUpload({ onFileUpload }) {
     setIsDragging(false);
     
     const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') {
-      onFileUpload(file);
+    const error = validatePdfFile(file);
+    if (error) {
+      alert(error);
     } else {
-      alert('Please upload a PDF file');
+      onFileUpload(file);
     }
   };
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
-    if (file && file.type === 'application/pdf') {
-      onFileUpload(file);
+    // User cancelled the picker — no file chosen, do nothing
+    if (!file) return;
+    const error = validatePdfFile(file);
+    if (error) {
+      alert(error);
+      // Reset the input so the same file can trigger onChange again if needed
+      e.target.value = '';
     } else {
-      alert('Please upload a PDF file');
+      onFileUpload(file);
     }
   };
 

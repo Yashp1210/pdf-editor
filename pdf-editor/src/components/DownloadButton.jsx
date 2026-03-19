@@ -23,11 +23,12 @@ function DownloadButton({ originalPdfBuffer, editedTexts, fileName }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = fileName.replace('.pdf', '_edited.pdf');
+      link.download = fileName.replace(/\.pdf$/i, '_edited.pdf');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // Delay revocation to ensure the browser has time to initiate the download
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
 
       setIsProcessing(false);
     } catch (error) {
