@@ -14,17 +14,6 @@ function App() {
   useEffect(() => {
     const handleUpdateText = (event) => {
       const { id, text, textItem } = event.detail;
-      console.log('═════════════════════════════════════════════');
-      console.log('📝 UPDATE EVENT RECEIVED in App.jsx');
-      console.log('═════════════════════════════════════════════');
-      console.log('Event detail:', event.detail);
-      console.log('  id:', id);
-      console.log('  text:', text);
-      if (textItem) {
-        console.log('  textItem.textColorCSS:', textItem.textColorCSS);
-        console.log('  textItem.textColor:', textItem.textColor);
-      }
-      console.log('═════════════════════════════════════════════');
       handleTextUpdate(id, text, textItem);
     };
 
@@ -33,7 +22,6 @@ function App() {
   }, []);
 
   const handleFileUpload = async (file) => {
-    console.log('📂 FILE UPLOADED:', file.name);
     setPdfFile(file);
     const arrayBuffer = await file.arrayBuffer();
     setPdfArrayBuffer(arrayBuffer);
@@ -42,15 +30,6 @@ function App() {
   };
 
   const handleTextUpdate = (textId, newText, textItem) => {
-    console.log('═════════════════════════════════════════════');
-    console.log('🔄 handleTextUpdate CALLED');
-    console.log('═════════════════════════════════════════════');
-    console.log('  textId:', textId);
-    console.log('  newText:', newText);
-    console.log('  textItem.textColor (array):', textItem?.textColor);
-    console.log('  textItem.textColorCSS (string):', textItem?.textColorCSS);
-    console.log('═════════════════════════════════════════════');
-
     setEditedTexts(prev => {
       const updateData = {
         text: newText,
@@ -58,30 +37,16 @@ function App() {
         colorArray: textItem?.textColor || [0, 0, 0],
       };
       
-      console.log('═════════════════════════════════════════════');
-      console.log('💾 STORING EDIT DATA');
-      console.log('═════════════════════════════════════════════');
-      console.log('textId:', textId);
-      console.log('updateData:', updateData);
-      console.log('updateData.color:', updateData.color);
-      console.log('updateData.colorArray:', updateData.colorArray);
-      console.log('═════════════════════════════════════════════');
-      
-      const result = {
+      return {
         ...prev,
         [textId]: updateData
       };
-      
-      console.log('Final stored value for', textId, ':', result[textId]);
-      
-      return result;
     });
     
     setRefreshKey(prev => prev + 1);
   };
 
   const handleReset = () => {
-    console.log('🔄 RESET: Clearing all edits');
     setPdfFile(null);
     setPdfArrayBuffer(null);
     setEditedTexts({});
@@ -182,7 +147,6 @@ function App() {
         {/* Footer */}
         <div className="text-center mt-12 text-gray-500 text-sm">
           <p>✨ All processing happens in your browser - your files never leave your device</p>
-          <p className="mt-2 text-xs">💾 Open DevTools (F12) → Console to see detailed color logging</p>
         </div>
       </div>
     </div>
