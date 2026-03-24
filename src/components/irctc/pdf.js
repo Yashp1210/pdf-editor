@@ -1,9 +1,13 @@
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
+import QRCode from "qrcode";
+
+// Bundle the pdf.js worker instead of loading from a CDN (avoids CSP issues in production)
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.js?url";
 
 import { INSURANCE_FEE, IRCTC_FEE } from "./fees";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
@@ -49,14 +53,15 @@ function buildQRContent(formData) {
 }
 
 async function generateQRDataURL(text) {
-  const url = `https://api.qrserver.com/v1/create-qr-code/?size=270x270&data=${encodeURIComponent(text)}`;
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(",")[1]);
-    reader.readAsDataURL(blob);
+  const dataUrl = await QRCode.toDataURL(text, {
+    width: 270,
+    margin: 1,
+    errorCorrectionLevel: "M",
   });
+
+  const parts = String(dataUrl).split(",");
+  if (parts.length < 2) throw new Error("Invalid QR data URL");
+  return parts[1];
 }
 
 export async function generatePDF(formData, templateBase64, fields) {

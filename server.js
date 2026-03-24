@@ -119,6 +119,15 @@ app.set('trust proxy', 1);
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        // Helmet's defaults do not set connect-src/worker-src, so they fall back to default-src/script-src.
+        // We keep network locked down (self only) and explicitly allow workers.
+        'connect-src': ["'self'"],
+        'worker-src': ["'self'", 'blob:'],
+      },
+    },
   })
 );
 
