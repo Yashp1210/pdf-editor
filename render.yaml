@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: pdf-editor
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REQUIRE_ENCRYPTED_PAYLOADS
+        value: "1"
+      # Set these in the Render dashboard (do not commit real secrets)
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: PUBLIC_ORIGIN
+        sync: false

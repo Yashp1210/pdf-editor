@@ -1,0 +1,25 @@
+node_modules/
+*.pdf
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editors
+.vscode/
+.idea/
+
+# Local cleanup/archive
+archive/
+
+# Frontend build output
+dist/
+.vite/
+
+# Test/coverage
+coverage/
