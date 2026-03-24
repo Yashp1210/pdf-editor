@@ -18,8 +18,27 @@ function generateRandomTransactionID() {
 }
 
 function extractStationCode(stationString) {
-  const match = stationString?.match(/\(([^)]+)\)/);
-  return match ? match[1].toUpperCase() : "NA";
+  if (!stationString) return "NA";
+
+  if (typeof stationString === "object") {
+    const code = stationString.code || stationString.stationCode || stationString.station_code;
+    if (code) return String(code).trim().toUpperCase();
+    return "NA";
+  }
+
+  const s = String(stationString).trim();
+  if (!s) return "NA";
+
+  const paren = s.match(/\(([^)]+)\)/);
+  if (paren && paren[1]) return String(paren[1]).trim().toUpperCase();
+
+  const dash = s.match(/-\s*([A-Za-z0-9]{2,6})\s*$/);
+  if (dash && dash[1]) return String(dash[1]).trim().toUpperCase();
+
+  const last = s.split(/\s+/).pop();
+  if (last && /^[A-Za-z0-9]{2,6}$/.test(last)) return last.toUpperCase();
+
+  return "NA";
 }
 
 function getFormattedStartDate(startDateString) {

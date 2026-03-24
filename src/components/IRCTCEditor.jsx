@@ -323,8 +323,31 @@ export default function IRCTCEditor() {
   }
 
   function extractStationCode(stationString) {
-    const match = stationString?.match(/\(([^)]+)\)/);
-    return match ? match[1].toUpperCase() : "NA";
+    if (!stationString) return "NA";
+
+    // If a future refactor passes an object instead of a string
+    if (typeof stationString === "object") {
+      const code = stationString.code || stationString.stationCode || stationString.station_code;
+      if (code) return String(code).trim().toUpperCase();
+      return "NA";
+    }
+
+    const s = String(stationString).trim();
+    if (!s) return "NA";
+
+    // Format: "SURAT (ST)"
+    const paren = s.match(/\(([^)]+)\)/);
+    if (paren && paren[1]) return String(paren[1]).trim().toUpperCase();
+
+    // Format: "SURAT - ST" or "AHMEDABAD JN - ADI"
+    const dash = s.match(/-\s*([A-Za-z0-9]{2,6})\s*$/);
+    if (dash && dash[1]) return String(dash[1]).trim().toUpperCase();
+
+    // Last token fallback: "ST" / "ADI" / "VAPI"
+    const last = s.split(/\s+/).pop();
+    if (last && /^[A-Za-z0-9]{2,6}$/.test(last)) return last.toUpperCase();
+
+    return "NA";
   }
 
   const handleDownload = () => {
@@ -332,7 +355,7 @@ export default function IRCTCEditor() {
     const fromCode = extractStationCode(formData.bookedFrom);
     const toCode = extractStationCode(formData.toStation);
     const dateStr = getFormattedStartDate(formData.startDate);
-    const fileName = `${fromCode}_${toCode}_${dateStr}.pdf`;
+    const fileName = `${fromCode}_${toCode}_${dateStr}_1.pdf`;
     const bytes = previewPDF instanceof Uint8Array ? previewPDF : new Uint8Array(previewPDF);
     const blob = new Blob([bytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
