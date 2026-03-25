@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { STATIONS, TRAINS } from "./data";
 import { fetchStations, fetchTrains } from "./api";
@@ -101,10 +101,20 @@ export function TrainAutocomplete({ from, to, value, onChange }) {
   );
 }
 
-export function StationAutocomplete({ value, onChange, placeholder }) {
+export function StationAutocomplete({ value, onChange, placeholder, exclude }) {
   const [suggestions, setSuggestions] = useState([]);
   const [hovered, setHovered] = useState(null);
   const [stations, setStations] = useState(STATIONS);
+
+  const excludedSet = useMemo(() => {
+    const values = Array.isArray(exclude) ? exclude : exclude ? [exclude] : [];
+    return new Set(
+      values
+        .filter(Boolean)
+        .map((v) => String(v).trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [exclude]);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,9 +143,13 @@ export function StationAutocomplete({ value, onChange, placeholder }) {
     }
 
     const list = stations && stations.length ? stations : STATIONS;
-    const filtered = list.filter((station) =>
-      station.toLowerCase().includes(val.toLowerCase())
-    );
+    const needle = val.toLowerCase();
+    const filtered = list.filter((station) => {
+      if (!station) return false;
+      const normalized = station.toLowerCase();
+      if (excludedSet.has(normalized)) return false;
+      return normalized.includes(needle);
+    });
 
     setSuggestions(filtered);
   };

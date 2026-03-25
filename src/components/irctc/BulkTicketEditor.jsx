@@ -302,6 +302,7 @@ export default function BulkTicketEditor({ templateBase64, fields }) {
               <div style={{ minWidth: 0 }}>
                 <StationAutocomplete
                   value={row.from}
+                  exclude={row.to}
                   onChange={(val) => updateRow(row.id, { from: val })}
                   placeholder="From station"
                 />
@@ -310,6 +311,7 @@ export default function BulkTicketEditor({ templateBase64, fields }) {
               <div style={{ minWidth: 0 }}>
                 <StationAutocomplete
                   value={row.to}
+                  exclude={row.from}
                   onChange={(val) => updateRow(row.id, { to: val })}
                   placeholder="To station"
                 />

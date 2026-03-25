@@ -541,6 +541,7 @@ export default function IRCTCEditor() {
               <label style={styles.label}>{FIELDS.bookedFrom.label}</label>
        <StationAutocomplete
   value={formData.bookedFrom}
+      exclude={formData.toStation}
   onChange={(val) => handleChange("bookedFrom", val)}
                 placeholder={FIELDS.bookedFrom.placeholder} maxLength={FIELDS.bookedFrom.maxLength} />
             </div>
@@ -548,6 +549,7 @@ export default function IRCTCEditor() {
               <label style={styles.label}>{FIELDS.toStation.label}</label>
          <StationAutocomplete
   value={formData.toStation}
+        exclude={formData.bookedFrom}
   onChange={(val) => handleChange("toStation", val)}
                 placeholder={FIELDS.toStation.placeholder} maxLength={FIELDS.toStation.maxLength} />
             </div>
