@@ -1,3 +1,11 @@
+import {
+  bodySha256ForJsonString,
+  canonicalPopMessage,
+  clearPopKeyId,
+  ensurePopRegistered,
+  signPopMessage,
+} from './pop';
+
 let cachedPublicKey = null;
 
 function b64Encode(bytes) {
@@ -110,19 +118,111 @@ async function encryptRequestEnvelope(url, bodyObj) {
   };
 }
 
-export async function encryptedJsonFetch(url, { method = 'POST', body } = {}) {
+export async function encryptedJsonFetch(url, { method = 'POST', body, pop = true } = {}) {
+  const popEnabled = pop;
+
   // One retry if server restarted and rotated its ephemeral key.
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const { aesKey, request } = await encryptRequestEnvelope(url, body);
+
+      const bodyStr = JSON.stringify(request);
+
+      // Proof-of-Possession signing (anti-replay + friction)
+      // We intentionally avoid signing:
+      // - auth endpoints (bootstrap)
+      // - crypto public key endpoint
+      // - PoP endpoints themselves
+      const shouldPopSign =
+        popEnabled &&
+        typeof url === 'string' &&
+        url.startsWith('/api/') &&
+        !url.startsWith('/api/auth/') &&
+        url !== '/api/crypto/public-key' &&
+        !url.startsWith('/api/pop/');
+
+      let popHeaders = {};
+      if (shouldPopSign) {
+        const register = ({ publicKeySpkiB64 }) =>
+          encryptedJsonFetch('/api/pop/register', { method: 'POST', body: { publicKeySpkiB64 }, pop: false });
+
+        let keyId = await ensurePopRegistered(register);
+
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+        const path = new URL(url, origin).pathname;
+        const bodySha256 = await bodySha256ForJsonString(bodyStr);
+
+        const challenge = await encryptedJsonFetch('/api/pop/challenge', {
+          method: 'POST',
+          body: { method: String(method || 'POST').toUpperCase(), path, bodySha256 },
+          pop: false,
+        });
+
+        if (!challenge?.success || !challenge?.nonce || !challenge?.ts) {
+          // Server may have restarted and lost its in-memory key registry.
+          const msg = String(challenge?.message || 'PoP challenge failed');
+          if (/not registered|invalid pop key/i.test(msg)) {
+            clearPopKeyId();
+            keyId = await ensurePopRegistered(register);
+            const retryChallenge = await encryptedJsonFetch('/api/pop/challenge', {
+              method: 'POST',
+              body: { method: String(method || 'POST').toUpperCase(), path, bodySha256 },
+              pop: false,
+            });
+
+            if (!retryChallenge?.success || !retryChallenge?.nonce || !retryChallenge?.ts) {
+              throw new Error(retryChallenge?.message || 'PoP challenge failed');
+            }
+
+            const retryMsg = canonicalPopMessage({
+              nonce: retryChallenge.nonce,
+              ts: retryChallenge.ts,
+              method: String(method || 'POST').toUpperCase(),
+              path,
+              bodySha256,
+            });
+
+            const retrySig = await signPopMessage(retryMsg);
+            popHeaders = {
+              'x-pop-keyid': keyId,
+              'x-pop-nonce': retryChallenge.nonce,
+              'x-pop-ts': retryChallenge.ts,
+              'x-pop-body-sha256': bodySha256,
+              'x-pop-sig': retrySig,
+            };
+          } else {
+            throw new Error(msg);
+          }
+        }
+
+        if (challenge?.success && challenge?.nonce && challenge?.ts) {
+          const msg = canonicalPopMessage({
+            nonce: challenge.nonce,
+            ts: challenge.ts,
+            method: String(method || 'POST').toUpperCase(),
+            path,
+            bodySha256,
+          });
+
+          const sig = await signPopMessage(msg);
+          popHeaders = {
+            'x-pop-keyid': keyId,
+            'x-pop-nonce': challenge.nonce,
+            'x-pop-ts': challenge.ts,
+            'x-pop-body-sha256': bodySha256,
+            'x-pop-sig': sig,
+          };
+        }
+      }
 
       const res = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           'x-enc': '1',
+          ...popHeaders,
         },
-        body: JSON.stringify(request),
+        body: bodyStr,
       });
 
       const json = await res.json().catch(() => null);

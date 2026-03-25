@@ -118,6 +118,13 @@ To find coordinates: use Adobe Acrobat's cursor coordinates or a tool like [PDF 
 | `AUTH_JWT_SECRET` | (dev-only fallback) | JWT signing secret (required in production) |
 | `PUBLIC_ORIGIN` | (none) | Allowed browser origin in production |
 | `REQUIRE_ENCRYPTED_PAYLOADS` | `1` | Require encrypted payloads for auth/core APIs |
+| `REQUIRE_POP_SIGNATURES` | `0` | If `1`, require proof-of-possession signatures for core `/api/*` calls |
+| `POP_NONCE_TTL_MS` | `60000` | PoP nonce lifetime in milliseconds (single-use) |
+| `API_RATE_WINDOW_MS` | `60000` | API rate-limit window (ms) |
+| `API_RATE_LIMIT` | `120` | Max requests per IP per API window |
+| `AUTH_RATE_WINDOW_MS` | `900000` | Auth rate-limit window (ms) |
+| `AUTH_RATE_LIMIT` | `20` | Max login/logout requests per IP per auth window |
+| `JSON_BODY_LIMIT` | `1mb` | Max JSON request body size |
 | `PORT` | `3000` | HTTP port (Render injects this in production) |
 
 ---

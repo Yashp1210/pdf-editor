@@ -15,6 +15,140 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const REQUIRE_ENCRYPTED_PAYLOADS = process.env.REQUIRE_ENCRYPTED_PAYLOADS !== '0';
 
+// --- Proof-of-Possession (PoP) request signing
+// Goal: prevent simple request replay from tools like Postman by requiring
+// a browser-held (non-extractable) private key + one-time server nonce.
+// NOTE: This is an anti-replay + friction layer, not a replacement for authz.
+const POP_REQUIRED = process.env.REQUIRE_POP_SIGNATURES === '1';
+const POP_NONCE_TTL_MS = Number(process.env.POP_NONCE_TTL_MS || 60_000);
+const popKeysByUserId = new Map(); // userId -> { keyId, publicKeyObj, createdAt }
+const popNonces = new Map(); // nonce -> { userId, keyId, method, path, bodySha256, ts, expiresAt }
+
+function bufToB64Url(buf) {
+  return Buffer.from(buf)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function b64UrlToBuf(s) {
+  const str = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padLen = (4 - (str.length % 4)) % 4;
+  return Buffer.from(str + '='.repeat(padLen), 'base64');
+}
+
+function sha256B64Url(buf) {
+  return bufToB64Url(crypto.createHash('sha256').update(buf).digest());
+}
+
+function canonicalPopMessage({ nonce, ts, method, path, bodySha256 }) {
+  // v1 is included so you can rotate formats later without breaking old clients.
+  return `v1:${nonce}:${ts}:${String(method || '').toUpperCase()}:${path}:${bodySha256}`;
+}
+
+function cleanupExpiredPopNonces() {
+  const now = Date.now();
+  for (const [nonce, rec] of popNonces.entries()) {
+    if (!rec || rec.expiresAt <= now) popNonces.delete(nonce);
+  }
+}
+
+function requirePopSignature(req, res, next) {
+  if (!POP_REQUIRED) return next();
+
+  // Exempt bootstrap and auth endpoints.
+  if (
+    req.path === '/api/health' ||
+    req.path === '/api/crypto/public-key' ||
+    req.path.startsWith('/api/auth/') ||
+    req.path.startsWith('/api/pop/')
+  ) {
+    return next();
+  }
+
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    const keyId = String(req.get('x-pop-keyid') || '');
+    const nonce = String(req.get('x-pop-nonce') || '');
+    const ts = String(req.get('x-pop-ts') || '');
+    const sigB64Url = String(req.get('x-pop-sig') || '');
+    const bodySha256Header = String(req.get('x-pop-body-sha256') || '');
+
+    if (!keyId || !nonce || !ts || !sigB64Url || !bodySha256Header) {
+      return res.status(401).json({ success: false, message: 'Missing PoP signature' });
+    }
+
+    const keyRec = popKeysByUserId.get(String(userId));
+    if (!keyRec || keyRec.keyId !== keyId) {
+      return res.status(401).json({ success: false, message: 'Invalid PoP key' });
+    }
+
+    cleanupExpiredPopNonces();
+    const nonceRec = popNonces.get(nonce);
+    if (!nonceRec) {
+      return res.status(401).json({ success: false, message: 'PoP nonce expired or already used' });
+    }
+
+    // Consume nonce (single-use). If verification fails, force a new nonce.
+    popNonces.delete(nonce);
+
+    const now = Date.now();
+    if (nonceRec.expiresAt <= now) {
+      return res.status(401).json({ success: false, message: 'PoP nonce expired' });
+    }
+    if (nonceRec.userId !== String(userId) || nonceRec.keyId !== keyId) {
+      return res.status(401).json({ success: false, message: 'PoP nonce not valid for this session' });
+    }
+
+    const reqMethod = String(req.method || '').toUpperCase();
+    const reqPath = req.path; // Express path without query string
+
+    if (nonceRec.method !== reqMethod || nonceRec.path !== reqPath) {
+      return res.status(401).json({ success: false, message: 'PoP nonce mismatch' });
+    }
+
+    const rawBodyBuf = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from('');
+    const bodySha256 = sha256B64Url(rawBodyBuf);
+    if (bodySha256 !== bodySha256Header) {
+      return res.status(401).json({ success: false, message: 'PoP body hash mismatch' });
+    }
+    if (nonceRec.bodySha256 !== bodySha256) {
+      return res.status(401).json({ success: false, message: 'PoP nonce mismatch' });
+    }
+
+    const msg = canonicalPopMessage({
+      nonce,
+      ts,
+      method: reqMethod,
+      path: reqPath,
+      bodySha256,
+    });
+
+    const sigBuf = b64UrlToBuf(sigB64Url);
+    const ok = crypto.verify(
+      'sha256',
+      Buffer.from(msg, 'utf8'),
+      {
+        key: keyRec.publicKeyObj,
+        padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+        saltLength: 32,
+      },
+      sigBuf
+    );
+
+    if (!ok) {
+      return res.status(401).json({ success: false, message: 'Invalid PoP signature' });
+    }
+
+    return next();
+  } catch (e) {
+    return res.status(401).json({ success: false, message: 'Invalid PoP signature' });
+  }
+}
+
 const FRONTEND_DIST_DIR = path.join(__dirname, 'dist');
 const FRONTEND_INDEX_HTML = path.join(FRONTEND_DIST_DIR, 'index.html');
 const hasFrontendBuild = fs.existsSync(FRONTEND_INDEX_HTML);
@@ -116,6 +250,29 @@ function sendMaybeEncryptedJson(req, res, payload) {
 // Middleware
 app.set('trust proxy', 1);
 
+// Apply rate limiting as early as possible to reduce CPU/memory DoS.
+// (Important: expensive operations like JSON parsing and RSA decrypt must not run before this.)
+const API_RATE_WINDOW_MS = Number(process.env.API_RATE_WINDOW_MS || 60_000);
+const API_RATE_LIMIT = Number(process.env.API_RATE_LIMIT || 120);
+const AUTH_RATE_WINDOW_MS = Number(process.env.AUTH_RATE_WINDOW_MS || 15 * 60_000);
+const AUTH_RATE_LIMIT = Number(process.env.AUTH_RATE_LIMIT || 20);
+
+const apiLimiter = rateLimit({
+  windowMs: API_RATE_WINDOW_MS,
+  limit: API_RATE_LIMIT,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+
+const authLimiter = rateLimit({
+  windowMs: AUTH_RATE_WINDOW_MS,
+  limit: AUTH_RATE_LIMIT,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+
+app.use('/api/', apiLimiter);
+
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -131,28 +288,21 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Capture raw body bytes for PoP body hashing.
+// Keep this small to reduce memory abuse; this API shouldn't need huge bodies.
+const JSON_LIMIT = process.env.JSON_BODY_LIMIT || '1mb';
+app.use(
+  express.json({
+    limit: JSON_LIMIT,
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(cookieParser());
 
 // Decrypt encrypted JSON bodies (x-enc=1)
 app.use('/api/', decryptIfEncrypted);
-
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 120,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-});
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-});
-
-app.use('/api/', apiLimiter);
 
 function getAllowedOrigins() {
   const allowed = [];
@@ -234,6 +384,69 @@ function requireAuth(req, res, next) {
   }
 }
 
+// PoP endpoints (register key + get one-time nonce)
+app.post('/api/pop/register', requireAuth, requireEncryptedTransport, (req, res) => {
+  try {
+    const userId = String(req.user?.id || '');
+    const publicKeySpkiB64 = String(req.body?.publicKeySpkiB64 || '');
+    if (!userId || !publicKeySpkiB64) {
+      return res.status(400).json({ success: false, message: 'publicKeySpkiB64 is required' });
+    }
+
+    const spkiDer = Buffer.from(publicKeySpkiB64, 'base64');
+    if (spkiDer.length < 128 || spkiDer.length > 4 * 1024) {
+      return res.status(400).json({ success: false, message: 'Invalid public key' });
+    }
+
+    const publicKeyObj = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
+    const keyId = crypto.createHash('sha256').update(spkiDer).digest('hex').slice(0, 16);
+
+    popKeysByUserId.set(userId, { keyId, publicKeyObj, createdAt: Date.now() });
+    sendMaybeEncryptedJson(req, res, { success: true, keyId });
+  } catch {
+    return res.status(400).json({ success: false, message: 'Invalid public key' });
+  }
+});
+
+app.post('/api/pop/challenge', requireAuth, requireEncryptedTransport, (req, res) => {
+  const userId = String(req.user?.id || '');
+  const keyRec = popKeysByUserId.get(userId);
+  if (!keyRec) return res.status(400).json({ success: false, message: 'PoP key not registered' });
+
+  const method = String(req.body?.method || '').toUpperCase();
+  const path = String(req.body?.path || '');
+  const bodySha256 = String(req.body?.bodySha256 || '');
+  if (!method || !path || !bodySha256) {
+    return res.status(400).json({ success: false, message: 'method, path, bodySha256 are required' });
+  }
+  if (!path.startsWith('/api/')) {
+    return res.status(400).json({ success: false, message: 'Invalid path' });
+  }
+
+  cleanupExpiredPopNonces();
+  const nonce = bufToB64Url(crypto.randomBytes(18));
+  const ts = String(Date.now());
+  const expiresAt = Number(ts) + POP_NONCE_TTL_MS;
+
+  popNonces.set(nonce, {
+    userId,
+    keyId: keyRec.keyId,
+    method,
+    path,
+    bodySha256,
+    ts,
+    expiresAt,
+  });
+
+  sendMaybeEncryptedJson(req, res, {
+    success: true,
+    keyId: keyRec.keyId,
+    nonce,
+    ts,
+    expiresInMs: POP_NONCE_TTL_MS,
+  });
+});
+
 // API
 app.get('/api/health', (req, res) => {
   res.json({ success: true });
@@ -286,7 +499,7 @@ app.get('/api/auth/me', (req, res) => {
   }
 });
 
-app.post('/api/stations', requireAuth, requireEncryptedTransport, async (req, res, next) => {
+app.post('/api/stations', requireAuth, requirePopSignature, requireEncryptedTransport, async (req, res, next) => {
   try {
     const stations = await getStations();
     sendMaybeEncryptedJson(req, res, { success: true, stations });
@@ -295,7 +508,7 @@ app.post('/api/stations', requireAuth, requireEncryptedTransport, async (req, re
   }
 });
 
-app.post('/api/distance', requireAuth, requireEncryptedTransport, async (req, res, next) => {
+app.post('/api/distance', requireAuth, requirePopSignature, requireEncryptedTransport, async (req, res, next) => {
   try {
     const from = String(req.body?.from || '');
     const to = String(req.body?.to || '');
@@ -308,7 +521,7 @@ app.post('/api/distance', requireAuth, requireEncryptedTransport, async (req, re
   }
 });
 
-app.post('/api/trains', requireAuth, requireEncryptedTransport, async (req, res, next) => {
+app.post('/api/trains', requireAuth, requirePopSignature, requireEncryptedTransport, async (req, res, next) => {
   try {
     const from = String(req.body?.from || '');
     const to = String(req.body?.to || '');
@@ -356,10 +569,16 @@ app.use((err, req, res, next) => {
   res.status(status).json({ success: false, message: err.message || 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n🚀 IRCTC Editor server running at http://localhost:${PORT}`);
   console.log(`📄 UI (dev): http://localhost:5173`);
   console.log(`📦 UI (build): npm run build && npm start\n`);
 });
+
+// Basic HTTP hardening (helps against slow connections / slowloris-style abuse).
+// Values are intentionally conservative; tune based on your traffic.
+server.keepAliveTimeout = Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 5_000);
+server.headersTimeout = Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 10_000);
+server.requestTimeout = Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 30_000);
 
 module.exports = app;

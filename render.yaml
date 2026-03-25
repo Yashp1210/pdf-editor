@@ -12,6 +12,25 @@ services:
         value: production
       - key: REQUIRE_ENCRYPTED_PAYLOADS
         value: "1"
+      # Optional but recommended hardening (set/tune in Render dashboard)
+      - key: REQUIRE_POP_SIGNATURES
+        value: "1"
+      - key: JSON_BODY_LIMIT
+        value: "256kb"
+      - key: API_RATE_WINDOW_MS
+        value: "60000"
+      - key: API_RATE_LIMIT
+        value: "60"
+      - key: AUTH_RATE_WINDOW_MS
+        value: "900000"
+      - key: AUTH_RATE_LIMIT
+        value: "20"
+      - key: HTTP_KEEP_ALIVE_TIMEOUT_MS
+        value: "5000"
+      - key: HTTP_HEADERS_TIMEOUT_MS
+        value: "10000"
+      - key: HTTP_REQUEST_TIMEOUT_MS
+        value: "30000"
       # Set these in the Render dashboard (do not commit real secrets)
       - key: DATABASE_URL
         sync: false
