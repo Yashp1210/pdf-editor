@@ -13,22 +13,57 @@ export default function LoginPage({ user, onLogin }) {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+
+  useEffect(() => {
+    if (!turnstileSiteKey) return;
+
+    // Load Turnstile script once.
+    if (document.querySelector('script[data-turnstile="1"]')) return;
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+    s.async = true;
+    s.defer = true;
+    s.setAttribute('data-turnstile', '1');
+    document.head.appendChild(s);
+  }, [turnstileSiteKey]);
 
   useEffect(() => {
     if (user) navigate('/', { replace: true });
   }, [user, navigate]);
 
+  useEffect(() => {
+    function onToken(e) {
+      const token = e?.detail?.token;
+      if (typeof token === 'string') setTurnstileToken(token);
+    }
+    window.addEventListener('turnstile-token', onToken);
+    return () => window.removeEventListener('turnstile-token', onToken);
+  }, []);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+
+    if (!turnstileSiteKey) {
+      setError('Captcha is not configured');
+      return;
+    }
+    if (!turnstileToken) {
+      setError('Please complete the captcha');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const data = await encryptedJsonFetch('/api/auth/login', {
         method: 'POST',
-        body: { email, password },
+        body: { email, password, turnstileToken },
       });
 
       if (!data?.success) {
@@ -78,6 +113,21 @@ export default function LoginPage({ user, onLogin }) {
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Captcha</label>
+            <div className="mt-2">
+              {turnstileSiteKey ? (
+                <div
+                  className="cf-turnstile"
+                  data-sitekey={turnstileSiteKey}
+                  data-callback="onTurnstile"
+                />
+              ) : (
+                <div className="text-sm text-gray-600">Captcha not configured.</div>
+              )}
+            </div>
+          </div>
+
           {error ? (
             <div className="text-sm text-red-600">{error}</div>
           ) : null}
@@ -93,4 +143,11 @@ export default function LoginPage({ user, onLogin }) {
       </div>
     </div>
   );
+}
+
+// Turnstile calls a global callback; keep it minimal and wire into React via a custom event.
+if (typeof window !== 'undefined' && !window.onTurnstile) {
+  window.onTurnstile = (token) => {
+    window.dispatchEvent(new CustomEvent('turnstile-token', { detail: { token } }));
+  };
 }

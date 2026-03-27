@@ -15,6 +15,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const REQUIRE_ENCRYPTED_PAYLOADS = process.env.REQUIRE_ENCRYPTED_PAYLOADS !== '0';
 
+// --- Basic HTTP hardening (helps under abusive traffic)
+// These settings reduce how long the server keeps sockets open.
+const HTTP_KEEP_ALIVE_TIMEOUT_MS = Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 5000);
+const HTTP_HEADERS_TIMEOUT_MS = Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 10000);
+const HTTP_REQUEST_TIMEOUT_MS = Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 30000);
+
+// --- Captcha (Cloudflare Turnstile) for login
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
+const TURNSTILE_VERIFY_URL = process.env.TURNSTILE_VERIFY_URL || 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
 // --- Proof-of-Possession (PoP) request signing
 // Goal: prevent simple request replay from tools like Postman by requiring
 // a browser-held (non-extractable) private key + one-time server nonce.
@@ -239,6 +249,28 @@ function requireEncryptedTransport(req, res, next) {
   return res.status(400).json({ success: false, message: 'Encrypted transport required' });
 }
 
+async function verifyTurnstileToken({ token, ip }) {
+  if (!TURNSTILE_SECRET_KEY) {
+    const err = new Error('TURNSTILE_SECRET_KEY is not set');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  const params = new URLSearchParams();
+  params.set('secret', TURNSTILE_SECRET_KEY);
+  params.set('response', String(token || ''));
+  if (ip) params.set('remoteip', String(ip));
+
+  const resp = await fetch(TURNSTILE_VERIFY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  const data = await resp.json().catch(() => null);
+  return Boolean(data?.success);
+}
+
 function sendMaybeEncryptedJson(req, res, payload) {
   if (!req._enc?.key) return res.json(payload);
 
@@ -285,6 +317,15 @@ function enforceTrustedProxyHeaders(req, res, next) {
   return next();
 }
 
+function requireSmallRequestBody(req, res, next) {
+  // Extra guard for endpoints that should be tiny (like login).
+  // Prevents wasting CPU on large bodies even if JSON_LIMIT is higher.
+  const rawLen = Buffer.isBuffer(req.rawBody) ? req.rawBody.length : 0;
+  const max = Number(process.env.AUTH_MAX_BODY_BYTES || 16 * 1024);
+  if (rawLen > max) return res.status(413).json({ success: false, message: 'Payload too large' });
+  return next();
+}
+
 // Apply rate limiting as early as possible to reduce CPU/memory DoS.
 // (Important: expensive operations like JSON parsing and RSA decrypt must not run before this.)
 const API_RATE_WINDOW_MS = Number(process.env.API_RATE_WINDOW_MS || 60_000);
@@ -303,6 +344,17 @@ const apiLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: AUTH_RATE_WINDOW_MS,
   limit: AUTH_RATE_LIMIT,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => getClientIp(req),
+});
+
+// Stricter limiter for credential-stuffing on login.
+const LOGIN_RATE_WINDOW_MS = Number(process.env.LOGIN_RATE_WINDOW_MS || 10 * 60_000);
+const LOGIN_RATE_LIMIT = Number(process.env.LOGIN_RATE_LIMIT || 10);
+const loginLimiter = rateLimit({
+  windowMs: LOGIN_RATE_WINDOW_MS,
+  limit: LOGIN_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   keyGenerator: (req) => getClientIp(req),
@@ -494,15 +546,32 @@ app.get('/api/crypto/public-key', (req, res) => {
   res.json({ success: true, keyId: ENC_KEY_ID, publicKeyPem: ENC_PUBLIC_KEY_PEM });
 });
 
-app.post('/api/auth/login', authLimiter, requireBrowserRequest, requireEncryptedTransport, async (req, res, next) => {
-  try {
+app.post(
+  '/api/auth/login',
+  loginLimiter,
+  authLimiter,
+  requireBrowserRequest,
+  requireSmallRequestBody,
+  requireEncryptedTransport,
+  async (req, res, next) => {
+    try {
     // Tighter controls on login endpoint
     // NOTE: This discourages Postman; it is not a foolproof anti-bot mechanism.
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
+      const turnstileToken = String(req.body?.turnstileToken || '');
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'email and password are required' });
     }
+
+      if (!turnstileToken) {
+        return res.status(400).json({ success: false, message: 'captcha is required' });
+      }
+
+      const okCaptcha = await verifyTurnstileToken({ token: turnstileToken, ip: getClientIp(req) });
+      if (!okCaptcha) {
+        return res.status(401).json({ success: false, message: 'captcha failed' });
+      }
 
     const user = await authenticateUser(email, password);
     if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -515,10 +584,11 @@ app.post('/api/auth/login', authLimiter, requireBrowserRequest, requireEncrypted
 
     setAuthCookie(res, token);
     sendMaybeEncryptedJson(req, res, { success: true, user: { email: user.email } });
-  } catch (e) {
-    next(e);
+    } catch (e) {
+      next(e);
+    }
   }
-});
+);
 
 app.post('/api/auth/logout', authLimiter, requireBrowserRequest, requireEncryptedTransport, (req, res) => {
   clearAuthCookie(res);
@@ -619,4 +689,4 @@ server.keepAliveTimeout = Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 5_000
 server.headersTimeout = Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 10_000);
 server.requestTimeout = Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 30_000);
 
-module.exports = app;
+module.exports = { app, server };
