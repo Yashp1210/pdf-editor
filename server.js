@@ -371,8 +371,11 @@ app.use(
       directives: {
         // Helmet's defaults do not set connect-src/worker-src, so they fall back to default-src/script-src.
         // We keep network locked down (self only) and explicitly allow workers.
+        // Turnstile requires loading a script and an iframe from Cloudflare.
         'connect-src': ["'self'"],
         'worker-src': ["'self'", 'blob:'],
+        'script-src': ["'self'", 'https://challenges.cloudflare.com'],
+        'frame-src': ["'self'", 'https://challenges.cloudflare.com'],
       },
     },
   })
