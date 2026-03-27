@@ -326,6 +326,26 @@ function requireSmallRequestBody(req, res, next) {
   return next();
 }
 
+// Simple concurrency limiter (in-process)
+function createConcurrencyLimiter({ max, statusCode = 503, message = 'Server busy' }) {
+  let inFlight = 0;
+  const maxConcurrent = Number(max);
+
+  return function concurrencyLimiter(req, res, next) {
+    if (!Number.isFinite(maxConcurrent) || maxConcurrent <= 0) return next();
+    if (inFlight >= maxConcurrent) return res.status(statusCode).json({ success: false, message });
+
+    inFlight += 1;
+    res.on('finish', () => {
+      inFlight = Math.max(0, inFlight - 1);
+    });
+    res.on('close', () => {
+      inFlight = Math.max(0, inFlight - 1);
+    });
+    return next();
+  };
+}
+
 // Apply rate limiting as early as possible to reduce CPU/memory DoS.
 // (Important: expensive operations like JSON parsing and RSA decrypt must not run before this.)
 const API_RATE_WINDOW_MS = Number(process.env.API_RATE_WINDOW_MS || 60_000);
@@ -358,6 +378,12 @@ const loginLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   keyGenerator: (req) => getClientIp(req),
+});
+
+const loginConcurrencyLimiter = createConcurrencyLimiter({
+  max: process.env.LOGIN_MAX_CONCURRENT || 10,
+  statusCode: 503,
+  message: 'Server busy, try again',
 });
 
 app.use('/api/', enforceTrustedProxyHeaders);
@@ -551,6 +577,7 @@ app.get('/api/crypto/public-key', (req, res) => {
 
 app.post(
   '/api/auth/login',
+  loginConcurrencyLimiter,
   loginLimiter,
   authLimiter,
   requireBrowserRequest,
