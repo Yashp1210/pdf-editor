@@ -401,6 +401,8 @@ app.use(
         'connect-src': ["'self'"],
         'worker-src': ["'self'", 'blob:'],
         'script-src': ["'self'", 'https://challenges.cloudflare.com'],
+        'script-src-attr': ["'self'", "'unsafe-inline'"],
+        'script-src-elem': ["'self'", 'https://challenges.cloudflare.com', "'unsafe-inline'"],
         'frame-src': ["'self'", 'https://challenges.cloudflare.com'],
       },
     },
