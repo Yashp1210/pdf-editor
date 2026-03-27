@@ -248,7 +248,42 @@ function sendMaybeEncryptedJson(req, res, payload) {
 }
 
 // Middleware
-app.set('trust proxy', 1);
+// When deployed behind Cloudflare (or any reverse proxy), the actual client IP arrives via
+// request headers. Express only uses those headers if `trust proxy` is enabled.
+//
+// IMPORTANT:
+// - Do not "set Cloudflare in response headers". Cloudflare sends headers *to us*.
+// - If we blindly trust all proxies, attackers can spoof X-Forwarded-For.
+//
+// Strategy:
+// - In production, trust the proxy (Cloudflare) and prefer CF-Connecting-IP.
+// - In dev, keep it permissive for local proxies.
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : true);
+
+function getClientIp(req) {
+  // Cloudflare sets this on inbound requests.
+  const cfConnectingIp = String(req.get('cf-connecting-ip') || '').trim();
+  if (cfConnectingIp) return cfConnectingIp;
+
+  // Fallback to Express's derived IP (respects trust proxy).
+  return req.ip;
+}
+
+function enforceTrustedProxyHeaders(req, res, next) {
+  // If you want to require that requests came through Cloudflare,
+  // set REQUIRE_CLOUDFLARE=1 in production.
+  if (process.env.NODE_ENV !== 'production') return next();
+  if (process.env.REQUIRE_CLOUDFLARE !== '1') return next();
+
+  // If we're requiring Cloudflare, ensure the canonical CF headers exist.
+  // (Note: This is not cryptographic verification; it’s a pragmatic guard.)
+  const hasCfRay = Boolean(req.get('cf-ray'));
+  const hasCfConnectingIp = Boolean(req.get('cf-connecting-ip'));
+  if (!hasCfRay || !hasCfConnectingIp) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+  return next();
+}
 
 // Apply rate limiting as early as possible to reduce CPU/memory DoS.
 // (Important: expensive operations like JSON parsing and RSA decrypt must not run before this.)
@@ -262,6 +297,7 @@ const apiLimiter = rateLimit({
   limit: API_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  keyGenerator: (req) => getClientIp(req),
 });
 
 const authLimiter = rateLimit({
@@ -269,8 +305,10 @@ const authLimiter = rateLimit({
   limit: AUTH_RATE_LIMIT,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  keyGenerator: (req) => getClientIp(req),
 });
 
+app.use('/api/', enforceTrustedProxyHeaders);
 app.use('/api/', apiLimiter);
 
 app.use(
