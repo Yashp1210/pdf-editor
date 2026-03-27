@@ -394,17 +394,22 @@ app.use(
     crossOriginResourcePolicy: false,
     contentSecurityPolicy: {
       useDefaults: true,
-      directives: {
+      directives: (() => {
+        const origin = process.env.PUBLIC_ORIGIN;
+        const clean = (arr) => arr.filter(Boolean);
+
+        return {
         // Helmet's defaults do not set connect-src/worker-src, so they fall back to default-src/script-src.
         // We keep network locked down (self only) and explicitly allow workers.
         // Turnstile requires loading a script and an iframe from Cloudflare.
         'connect-src': ["'self'"],
         'worker-src': ["'self'", 'blob:'],
-        'script-src': ["'self'", 'https://challenges.cloudflare.com'],
+        'script-src': clean(["'self'", 'https://challenges.cloudflare.com', origin]),
         'script-src-attr': ["'self'", "'unsafe-inline'"],
-        'script-src-elem': ["'self'", 'https://challenges.cloudflare.com', "'unsafe-inline'"],
+        'script-src-elem': clean(["'self'", 'https://challenges.cloudflare.com', origin, "'unsafe-inline'"]),
         'frame-src': ["'self'", 'https://challenges.cloudflare.com'],
-      },
+        };
+      })(),
     },
   })
 );
