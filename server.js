@@ -361,6 +361,18 @@ const apiLimiter = rateLimit({
   keyGenerator: (req) => getClientIp(req),
 });
 
+// Public-key endpoint is hit by every encrypted request bootstrap.
+// Give it its own limiter so it can't starve the rest of /api and won't lock out other users.
+const PUBLIC_KEY_RATE_WINDOW_MS = Number(process.env.PUBLIC_KEY_RATE_WINDOW_MS || 60_000);
+const PUBLIC_KEY_RATE_LIMIT = Number(process.env.PUBLIC_KEY_RATE_LIMIT || 120);
+const publicKeyLimiter = rateLimit({
+  windowMs: PUBLIC_KEY_RATE_WINDOW_MS,
+  limit: PUBLIC_KEY_RATE_LIMIT,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => getClientIp(req),
+});
+
 const authLimiter = rateLimit({
   windowMs: AUTH_RATE_WINDOW_MS,
   limit: AUTH_RATE_LIMIT,
@@ -387,7 +399,12 @@ const loginConcurrencyLimiter = createConcurrencyLimiter({
 });
 
 app.use('/api/', enforceTrustedProxyHeaders);
-app.use('/api/', apiLimiter);
+
+// Apply global API limiter, but exclude bootstrap endpoints.
+app.use('/api/', (req, res, next) => {
+  if (req.path === '/api/health' || req.path === '/api/crypto/public-key') return next();
+  return apiLimiter(req, res, next);
+});
 
 app.use(
   helmet({
@@ -578,7 +595,7 @@ app.get('/api/health', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/crypto/public-key', (req, res) => {
+app.get('/api/crypto/public-key', publicKeyLimiter, (req, res) => {
   res.json({ success: true, keyId: ENC_KEY_ID, publicKeyPem: ENC_PUBLIC_KEY_PEM });
 });
 
