@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { encryptedJsonFetch } from '../utils/encryptedJsonFetch';
 
@@ -14,6 +14,7 @@ export default function LoginPage({ user, onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
+  const turnstileTokenRef = useRef('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [focusedField, setFocusedField] = useState(null);
@@ -37,19 +38,26 @@ export default function LoginPage({ user, onLogin }) {
   }, [user, navigate]);
 
   useEffect(() => {
-    if (!turnstileSiteKey || !window.turnstile) return;
+    if (!turnstileSiteKey) return;
 
-    // Use Turnstile's programmatic API via data-callback
-    // Set global callback that Turnstile will call when challenge completes
+    // IMPORTANT: Don't gate on `window.turnstile`.
+    // The script loads async; the callback functions must exist on `window`
+    // so Turnstile can call them when the user completes the challenge.
     window.onTurnstileCallback = (token) => {
-      setTurnstileToken(token);
-      console.log('[Turnstile] Token received:', token ? `${token.slice(0, 20)}...` : 'empty');
+      const nextToken = typeof token === 'string' ? token : '';
+      turnstileTokenRef.current = nextToken;
+      setTurnstileToken(nextToken);
+      if (nextToken) setError('');
+      console.log('[Turnstile] Token received:', nextToken ? `${nextToken.slice(0, 20)}...` : 'empty');
     };
     window.onTurnstileExpire = () => {
+      turnstileTokenRef.current = '';
       setTurnstileToken('');
       console.log('[Turnstile] Token expired');
     };
     window.onTurnstileError = (errorCode) => {
+      turnstileTokenRef.current = '';
+      setTurnstileToken('');
       console.error('[Turnstile] Error:', errorCode);
     };
   }, [turnstileSiteKey]);
@@ -58,11 +66,13 @@ export default function LoginPage({ user, onLogin }) {
     e.preventDefault();
     setError('');
 
+    const tokenToSend = String(turnstileTokenRef.current || turnstileToken || '');
+
     if (!turnstileSiteKey) {
       setError('Captcha is not configured');
       return;
     }
-    if (!turnstileToken) {
+    if (!tokenToSend) {
       setError('Please complete the captcha');
       return;
     }
@@ -72,7 +82,7 @@ export default function LoginPage({ user, onLogin }) {
     try {
       const data = await encryptedJsonFetch('/api/auth/login', {
         method: 'POST',
-        body: { email, password, turnstileToken },
+        body: { email, password, turnstileToken: tokenToSend },
       });
 
       if (!data?.success) {
