@@ -86,14 +86,41 @@ export default function LoginPage({ user, onLogin }) {
       });
 
       if (!data?.success) {
-        setError(data?.message || 'Login failed');
+        const msg = String(data?.message || 'Login failed');
+        setError(msg);
+
+        // Turnstile tokens are one-time and can expire.
+        // If server says captcha failed, force a reset so the user gets a fresh token.
+        if (/captcha\s+failed|captcha\s+is\s+required/i.test(msg)) {
+          turnstileTokenRef.current = '';
+          setTurnstileToken('');
+          try {
+            if (typeof window !== 'undefined' && window.turnstile?.reset) {
+              window.turnstile.reset();
+            }
+          } catch {
+            // ignore
+          }
+        }
         return;
       }
 
       await onLogin?.();
       navigate(fromPath, { replace: true });
     } catch (err) {
-      setError(err?.message || 'Login failed');
+      const msg = String(err?.message || 'Login failed');
+      setError(msg);
+      if (/captcha\s+failed|captcha\s+is\s+required/i.test(msg)) {
+        turnstileTokenRef.current = '';
+        setTurnstileToken('');
+        try {
+          if (typeof window !== 'undefined' && window.turnstile?.reset) {
+            window.turnstile.reset();
+          }
+        } catch {
+          // ignore
+        }
+      }
     } finally {
       setIsSubmitting(false);
     }
