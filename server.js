@@ -617,36 +617,92 @@ app.post(
   requireEncryptedTransport,
   async (req, res, next) => {
     try {
-    // Tighter controls on login endpoint
-    // NOTE: This discourages Postman; it is not a foolproof anti-bot mechanism.
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
+      // Step 1: Validate email and password exist
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const password = String(req.body?.password || '');
+      
+      if (!email || !password) {
+        return sendMaybeEncryptedJson(req, res.status(400), { 
+          success: false, 
+          message: 'email and password are required' 
+        });
+      }
+ 
+      // Step 2: Validate captcha token exists
       const turnstileToken = String(req.body?.turnstileToken || '');
-    if (!email || !password) {
-      return sendMaybeEncryptedJson(req, res.status(400), { success: false, message: 'email and password are required' });
-    }
-
       if (!turnstileToken) {
-        return sendMaybeEncryptedJson(req, res.status(400), { success: false, message: 'captcha is required' });
+        return sendMaybeEncryptedJson(req, res.status(400), { 
+          success: false, 
+          message: 'captcha is required' 
+        });
       }
-
-      const okCaptcha = await verifyTurnstileToken({ token: turnstileToken });
-      if (!okCaptcha) {
-        return sendMaybeEncryptedJson(req, res.status(401), { success: false, message: 'captcha failed' });
+ 
+      // Step 3: Verify captcha SEPARATELY with its own error handling
+      let captchaValid = false;
+      try {
+        captchaValid = await verifyTurnstileToken({ token: turnstileToken });
+      } catch (captchaError) {
+        console.error('[LOGIN] Captcha verification error:', captchaError.message);
+        return sendMaybeEncryptedJson(req, res.status(500), { 
+          success: false, 
+          message: 'Captcha service temporarily unavailable' 
+        });
       }
-
-    const user = await authenticateUser(email, password);
-    if (!user) return sendMaybeEncryptedJson(req, res.status(401), { success: false, message: 'Invalid credentials' });
-
-    const token = jwt.sign(
-      { email: user.email },
-      getJwtSecret(),
-      { subject: user.id, expiresIn: '7d' }
-    );
-
-    setAuthCookie(res, token);
-    sendMaybeEncryptedJson(req, res, { success: true, user: { email: user.email } });
+ 
+      if (!captchaValid) {
+        return sendMaybeEncryptedJson(req, res.status(401), { 
+          success: false, 
+          message: 'Captcha verification failed' 
+        });
+      }
+ 
+      // Step 4: Only proceed to authenticate user if captcha passed
+      let user = null;
+      try {
+        user = await authenticateUser(email, password);
+      } catch (authError) {
+        // If authenticateUser throws an error (DB error, connection error, etc.)
+        // Log it server-side but return generic "Invalid credentials" to client
+        console.error('[LOGIN] Authentication service error:', {
+          email,
+          error: authError.message,
+          stack: authError.stack,
+        });
+        return sendMaybeEncryptedJson(req, res.status(401), { 
+          success: false, 
+          message: 'Invalid credentials' 
+        });
+      }
+ 
+      // If authenticateUser returned null/falsy, credentials are wrong
+      if (!user) {
+        return sendMaybeEncryptedJson(req, res.status(401), { 
+          success: false, 
+          message: 'Invalid credentials' 
+        });
+      }
+ 
+      // Step 5: Create JWT and set cookie
+      const token = jwt.sign(
+        { email: user.email },
+        getJwtSecret(),
+        { subject: user.id, expiresIn: '7d' }
+      );
+ 
+      setAuthCookie(res, token);
+      
+      // Return success - client should redirect to home
+      sendMaybeEncryptedJson(req, res, { 
+        success: true, 
+        user: { email: user.email } 
+      });
+ 
     } catch (e) {
+      // Unexpected errors - let global error handler catch it
+      console.error('[LOGIN] Unexpected error:', {
+        message: e.message,
+        stack: e.stack,
+      });
       next(e);
     }
   }
