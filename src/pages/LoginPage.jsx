@@ -37,13 +37,22 @@ export default function LoginPage({ user, onLogin }) {
   }, [user, navigate]);
 
   useEffect(() => {
-    function onToken(e) {
-      const token = e?.detail?.token;
-      if (typeof token === 'string') setTurnstileToken(token);
-    }
-    window.addEventListener('turnstile-token', onToken);
-    return () => window.removeEventListener('turnstile-token', onToken);
-  }, []);
+    if (!turnstileSiteKey || !window.turnstile) return;
+
+    // Use Turnstile's programmatic API via data-callback
+    // Set global callback that Turnstile will call when challenge completes
+    window.onTurnstileCallback = (token) => {
+      setTurnstileToken(token);
+      console.log('[Turnstile] Token received:', token ? `${token.slice(0, 20)}...` : 'empty');
+    };
+    window.onTurnstileExpire = () => {
+      setTurnstileToken('');
+      console.log('[Turnstile] Token expired');
+    };
+    window.onTurnstileError = (errorCode) => {
+      console.error('[Turnstile] Error:', errorCode);
+    };
+  }, [turnstileSiteKey]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -265,7 +274,9 @@ export default function LoginPage({ user, onLogin }) {
                 <div
                   className="cf-turnstile"
                   data-sitekey={turnstileSiteKey}
-                  data-callback="onTurnstile"
+                  data-callback="onTurnstileCallback"
+                  data-error-callback="onTurnstileError"
+                  data-expired-callback="onTurnstileExpire"
                   data-theme="dark"
                 />
               ) : (
@@ -347,8 +358,11 @@ export default function LoginPage({ user, onLogin }) {
   );
 }
 
-if (typeof window !== 'undefined' && !window.onTurnstile) {
-  window.onTurnstile = (token) => {
-    window.dispatchEvent(new CustomEvent('turnstile-token', { detail: { token } }));
-  };
+
+// Ensure Turnstile callbacks exist at window level
+// (Turnstile calls these when challenge events occur)
+if (typeof window !== 'undefined') {
+  if (!window.onTurnstileCallback) window.onTurnstileCallback = () => {};
+  if (!window.onTurnstileError) window.onTurnstileError = () => {};
+  if (!window.onTurnstileExpire) window.onTurnstileExpire = () => {};
 }
