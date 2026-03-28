@@ -122,6 +122,17 @@ export default function LoginPage({ user, onLogin }) {
         }
       }
     } finally {
+      // Turnstile tokens are one-time use. After any attempt (even invalid credentials),
+      // reset so the next submit cannot reuse an already-consumed token.
+      turnstileTokenRef.current = '';
+      setTurnstileToken('');
+      try {
+        if (typeof window !== 'undefined' && window.turnstile?.reset) {
+          window.turnstile.reset();
+        }
+      } catch {
+        // ignore
+      }
       setIsSubmitting(false);
     }
   }

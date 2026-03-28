@@ -152,11 +152,18 @@ export async function encryptedJsonFetch(url, { method = 'POST', body, pop = tru
         const path = new URL(url, origin).pathname;
         const bodySha256 = await bodySha256ForJsonString(bodyStr);
 
-        const challenge = await encryptedJsonFetch('/api/pop/challenge', {
-          method: 'POST',
-          body: { method: String(method || 'POST').toUpperCase(), path, bodySha256 },
-          pop: false,
-        });
+        let challenge;
+        try {
+          challenge = await encryptedJsonFetch('/api/pop/challenge', {
+            method: 'POST',
+            body: { method: String(method || 'POST').toUpperCase(), path, bodySha256 },
+            pop: false,
+          });
+        } catch (e) {
+          // The inner request throws on non-2xx. For PoP we want to interpret
+          // the message and recover by re-registering the key if needed.
+          challenge = { success: false, message: e?.message || 'PoP challenge failed' };
+        }
 
         if (!challenge?.success || !challenge?.nonce || !challenge?.ts) {
           // Server may have restarted and lost its in-memory key registry.
@@ -164,11 +171,16 @@ export async function encryptedJsonFetch(url, { method = 'POST', body, pop = tru
           if (/not registered|invalid pop key/i.test(msg)) {
             clearPopKeyId();
             keyId = await ensurePopRegistered(register);
-            const retryChallenge = await encryptedJsonFetch('/api/pop/challenge', {
-              method: 'POST',
-              body: { method: String(method || 'POST').toUpperCase(), path, bodySha256 },
-              pop: false,
-            });
+            let retryChallenge;
+            try {
+              retryChallenge = await encryptedJsonFetch('/api/pop/challenge', {
+                method: 'POST',
+                body: { method: String(method || 'POST').toUpperCase(), path, bodySha256 },
+                pop: false,
+              });
+            } catch (e) {
+              retryChallenge = { success: false, message: e?.message || 'PoP challenge failed' };
+            }
 
             if (!retryChallenge?.success || !retryChallenge?.nonce || !retryChallenge?.ts) {
               throw new Error(retryChallenge?.message || 'PoP challenge failed');
