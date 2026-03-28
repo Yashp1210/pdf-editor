@@ -3,7 +3,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import QRCode from "qrcode";
 
 // Bundle the pdf.js worker instead of loading from a CDN (avoids CSP issues in production)
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.js?url";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { INSURANCE_FEE, IRCTC_FEE } from "./fees";
 
