@@ -269,16 +269,14 @@ async function verifyTurnstileToken({ token }) {
   const data = await resp.json().catch(() => null);
   const ok = Boolean(data?.success);
   if (!ok) {
-    // Log only server-side; do not leak detailed codes to clients.
-    const codes = Array.isArray(data?.['error-codes']) ? data['error-codes'].join(',') : '';
-    console.warn('[turnstile] verification failed', {
-      status: resp.status,
-      codes,
-    });
+    // Keep logs quiet in production.
+    if (process.env.NODE_ENV !== 'production') {
+      const codes = Array.isArray(data?.['error-codes']) ? data['error-codes'].join(',') : '';
+      console.warn('[turnstile] verification failed', { status: resp.status, codes });
+    }
   }
   return ok;
 }
-
 
 
 function sendMaybeEncryptedJson(req, res, payload) {

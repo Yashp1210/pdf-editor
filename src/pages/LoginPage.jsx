@@ -49,17 +49,19 @@ export default function LoginPage({ user, onLogin }) {
       turnstileTokenRef.current = nextToken;
       setTurnstileToken(nextToken);
       if (nextToken) setError('');
-      console.log('[Turnstile] Token received:', nextToken ? `${nextToken.slice(0, 20)}...` : 'empty');
+      if (import.meta.env.DEV) {
+        console.log('[Turnstile] Token received:', nextToken ? `${nextToken.slice(0, 20)}...` : 'empty');
+      }
     };
     window.onTurnstileExpire = () => {
       turnstileTokenRef.current = '';
       setTurnstileToken('');
-      console.log('[Turnstile] Token expired');
+      if (import.meta.env.DEV) console.log('[Turnstile] Token expired');
     };
     window.onTurnstileError = (errorCode) => {
       turnstileTokenRef.current = '';
       setTurnstileToken('');
-      console.error('[Turnstile] Error:', errorCode);
+      if (import.meta.env.DEV) console.error('[Turnstile] Error:', errorCode);
     };
   }, [turnstileSiteKey]);
 
