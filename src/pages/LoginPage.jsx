@@ -15,6 +15,7 @@ export default function LoginPage({ user, onLogin }) {
   const [password, setPassword] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
   const turnstileTokenRef = useRef('');
+  const submitInFlightRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [focusedField, setFocusedField] = useState(null);
@@ -64,6 +65,8 @@ export default function LoginPage({ user, onLogin }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
+
+    if (submitInFlightRef.current) return;
     setError('');
 
     const tokenToSend = String(turnstileTokenRef.current || turnstileToken || '');
@@ -77,6 +80,7 @@ export default function LoginPage({ user, onLogin }) {
       return;
     }
 
+    submitInFlightRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -133,6 +137,8 @@ export default function LoginPage({ user, onLogin }) {
       } catch {
         // ignore
       }
+
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }

@@ -249,72 +249,37 @@ function requireEncryptedTransport(req, res, next) {
   return res.status(400).json({ success: false, message: 'Encrypted transport required' });
 }
 
-// async function verifyTurnstileToken({ token }) {
-//   if (!TURNSTILE_SECRET_KEY) {
-//     const err = new Error('TURNSTILE_SECRET_KEY is not set');
-//     err.statusCode = 500;
-//     throw err;
-//   }
-
-//   const params = new URLSearchParams();
-//   params.set('secret', TURNSTILE_SECRET_KEY);
-//   params.set('response', String(token || ''));
-
-//   const resp = await fetch(TURNSTILE_VERIFY_URL, {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-//     body: params.toString(),
-//   });
-
-//   const data = await resp.json().catch(() => null);
-//   const ok = Boolean(data?.success);
-//   if (!ok) {
-//     // Log only server-side; do not leak detailed codes to clients.
-//     const codes = Array.isArray(data?.['error-codes']) ? data['error-codes'].join(',') : '';
-//     console.warn('[turnstile] verification failed', {
-//       status: resp.status,
-//       codes,
-//     });
-//   }
-//   return ok;
-// }
-
 async function verifyTurnstileToken({ token }) {
   if (!TURNSTILE_SECRET_KEY) {
-    console.error('[TURNSTILE] ❌ SECRET KEY NOT SET!');
     const err = new Error('TURNSTILE_SECRET_KEY is not set');
     err.statusCode = 500;
     throw err;
   }
 
-  console.log('[TURNSTILE] Verifying token:', token.substring(0, 30) + '...');
-  console.log('[TURNSTILE] Secret key exists:', !!TURNSTILE_SECRET_KEY);
-  console.log('[TURNSTILE] Secret key length:', TURNSTILE_SECRET_KEY.length);
-
   const params = new URLSearchParams();
   params.set('secret', TURNSTILE_SECRET_KEY);
   params.set('response', String(token || ''));
 
-  try {
-    const resp = await fetch(TURNSTILE_VERIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
+  const resp = await fetch(TURNSTILE_VERIFY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  const data = await resp.json().catch(() => null);
+  const ok = Boolean(data?.success);
+  if (!ok) {
+    // Log only server-side; do not leak detailed codes to clients.
+    const codes = Array.isArray(data?.['error-codes']) ? data['error-codes'].join(',') : '';
+    console.warn('[turnstile] verification failed', {
+      status: resp.status,
+      codes,
     });
-
-    console.log('[TURNSTILE] Response status:', resp.status);
-    const data = await resp.json().catch(() => null);
-    console.log('[TURNSTILE] Response data:', JSON.stringify(data, null, 2));
-
-    const ok = Boolean(data?.success);
-    console.log('[TURNSTILE] Verification result:', ok ? '✅ PASS' : '❌ FAIL');
-    
-    return ok;
-  } catch (e) {
-    console.error('[TURNSTILE] Network error:', e.message);
-    throw e;
   }
+  return ok;
 }
+
+
 
 function sendMaybeEncryptedJson(req, res, payload) {
   if (!req._enc?.key) return res.json(payload);

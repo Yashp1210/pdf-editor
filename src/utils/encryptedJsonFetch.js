@@ -33,7 +33,7 @@ function pemToDer(pem) {
 }
 
 async function loadServerPublicKey() {
-  const res = await fetch('/api/crypto/public-key');
+  const res = await fetch('/api/crypto/public-key', { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to load crypto public key');
   const data = await res.json().catch(() => null);
   if (!data?.success || !data?.publicKeyPem || !data?.keyId) throw new Error('Invalid crypto public key response');
@@ -229,6 +229,7 @@ export async function encryptedJsonFetch(url, { method = 'POST', body, pop = tru
 
       const res = await fetch(url, {
         method,
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'x-enc': '1',
