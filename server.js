@@ -249,7 +249,7 @@ function requireEncryptedTransport(req, res, next) {
   return res.status(400).json({ success: false, message: 'Encrypted transport required' });
 }
 
-async function verifyTurnstileToken({ token, ip }) {
+async function verifyTurnstileToken({ token }) {
   if (!TURNSTILE_SECRET_KEY) {
     const err = new Error('TURNSTILE_SECRET_KEY is not set');
     err.statusCode = 500;
@@ -259,7 +259,6 @@ async function verifyTurnstileToken({ token, ip }) {
   const params = new URLSearchParams();
   params.set('secret', TURNSTILE_SECRET_KEY);
   params.set('response', String(token || ''));
-  if (ip) params.set('remoteip', String(ip));
 
   const resp = await fetch(TURNSTILE_VERIFY_URL, {
     method: 'POST',
@@ -268,7 +267,16 @@ async function verifyTurnstileToken({ token, ip }) {
   });
 
   const data = await resp.json().catch(() => null);
-  return Boolean(data?.success);
+  const ok = Boolean(data?.success);
+  if (!ok) {
+    // Log only server-side; do not leak detailed codes to clients.
+    const codes = Array.isArray(data?.['error-codes']) ? data['error-codes'].join(',') : '';
+    console.warn('[turnstile] verification failed', {
+      status: resp.status,
+      codes,
+    });
+  }
+  return ok;
 }
 
 function sendMaybeEncryptedJson(req, res, payload) {
@@ -615,20 +623,20 @@ app.post(
     const password = String(req.body?.password || '');
       const turnstileToken = String(req.body?.turnstileToken || '');
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'email and password are required' });
+      return sendMaybeEncryptedJson(req, res.status(400), { success: false, message: 'email and password are required' });
     }
 
       if (!turnstileToken) {
-        return res.status(400).json({ success: false, message: 'captcha is required' });
+        return sendMaybeEncryptedJson(req, res.status(400), { success: false, message: 'captcha is required' });
       }
 
-      const okCaptcha = await verifyTurnstileToken({ token: turnstileToken, ip: getClientIp(req) });
+      const okCaptcha = await verifyTurnstileToken({ token: turnstileToken });
       if (!okCaptcha) {
-        return res.status(401).json({ success: false, message: 'captcha failed' });
+        return sendMaybeEncryptedJson(req, res.status(401), { success: false, message: 'captcha failed' });
       }
 
     const user = await authenticateUser(email, password);
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!user) return sendMaybeEncryptedJson(req, res.status(401), { success: false, message: 'Invalid credentials' });
 
     const token = jwt.sign(
       { email: user.email },
